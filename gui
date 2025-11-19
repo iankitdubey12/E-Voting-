@@ -1,0 +1,129 @@
+import sys
+import subprocess
+from PyQt5.QtWidgets import (
+    QApplication, QWidget, QPushButton, QVBoxLayout,
+    QTextEdit, QInputDialog, QLineEdit, QMessageBox
+)
+from PyQt5.QtCore import QThread, pyqtSignal
+
+EXECUTABLE = r"C:/Users/Ankit/.vscode/E-Voting/voting.exe"
+
+class ReadOutputThread(QThread):
+    new_text = pyqtSignal(str)
+    prompt_signal = pyqtSignal(str)
+
+    def __init__(self, process):
+        super().__init__()
+        self.process = process
+        self.buffer = ""
+
+    def run(self):
+        while True:
+            char = self.process.stdout.read(1)
+            if not char:
+                break
+            self.new_text.emit(char)
+            self.buffer += char
+            
+            prompts = [
+                "Enter number of candidates",
+                "Enter maximum voters",
+                "Candidate",
+                "Party:",
+                "Age:",
+                "Enter Name:",
+                "Enter Age:",
+                "Enter Address:",
+                "Enter Voter ID:",
+                "Enter Aadhar:",
+                "Enter Party to Vote:",
+                "Enter choice:"
+            ]
+            for keyword in prompts:
+                if keyword in self.buffer:
+                    self.buffer = self.buffer.replace(keyword, "")
+                    self.prompt_signal.emit(keyword)
+                    break
+
+class VotingGUI(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Voting System GUI")
+        self.setGeometry(200, 200, 800, 500)
+
+        self.layout = QVBoxLayout()
+        self.setLayout(self.layout)
+
+        self.output_box = QTextEdit()
+        self.output_box.setReadOnly(True)
+        self.layout.addWidget(self.output_box)
+
+        self.start_btn = QPushButton("Start Voting")
+        self.start_btn.clicked.connect(self.start_program)
+        self.layout.addWidget(self.start_btn)
+
+        self.stop_btn = QPushButton("Stop Program")
+        self.stop_btn.clicked.connect(self.stop_program)
+        self.layout.addWidget(self.stop_btn)
+
+        self.process = None
+        self.thread = None
+
+    def start_program(self):
+        if self.process:
+            QMessageBox.information(self, "Info", "Program already running")
+            return
+
+        try:
+            self.process = subprocess.Popen(
+                [EXECUTABLE],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1
+            )
+        except Exception as e:
+            QMessageBox.critical(self, "Error", str(e))
+            return
+
+        self.thread = ReadOutputThread(self.process)
+        self.thread.new_text.connect(self.update_output)
+        self.thread.prompt_signal.connect(self.handle_prompt)
+        self.thread.start()
+
+        self.output_box.append("Voting program started.\n")
+
+    def update_output(self, text):
+        self.output_box.moveCursor(self.output_box.textCursor().End)
+        self.output_box.insertPlainText(text)
+        self.output_box.moveCursor(self.output_box.textCursor().End)
+
+    def handle_prompt(self, prompt):
+        if "number of candidates" in prompt:
+            value, ok = QInputDialog.getInt(self, "Input", "Enter number of candidates:")
+        elif "maximum voters" in prompt:
+            value, ok = QInputDialog.getInt(self, "Input", "Enter maximum voters:")
+        else:
+            value, ok = QInputDialog.getText(self, "Input", prompt.strip(), QLineEdit.Normal)
+
+        if ok and value:
+            self.send_input(str(value))
+
+    def send_input(self, text):
+        if self.process:
+            self.process.stdin.write(text + "\n")
+            self.process.stdin.flush()
+            self.output_box.append(f"> {text}")
+
+    def stop_program(self):
+        if self.process:
+            self.process.terminate()
+            self.process = None
+            self.output_box.append("Voting program terminated.\n")
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    gui = VotingGUI()
+    gui.show()
+    sys.exit(app.exec_())
